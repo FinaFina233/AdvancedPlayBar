@@ -15,6 +15,10 @@
 
     var SCOPE = '#page_pc_mini_bar';
 
+    // 毛玻璃宿主类名。毛玻璃不能加在播放栏自己身上（backdrop-filter 会创建
+    // 层叠上下文，把进度条白点盖住），要挪到它的父容器上，见 syncBlurHost()
+    var BLUR_HOST_CLS = 'apb-blur-host';
+
     // 播放栏选择器（包含静态类名及 CSS Module 动态哈希前缀，使用 *= 兼容跨版本）
     var BAR_SELECTORS = '.default-bar-wrapper, [class*="DefaultBarWrapper_"]';
 
@@ -337,11 +341,19 @@
         L.push('  background: ' + bg + ' !important;');
         L.push('  background-color: ' + bg + ' !important;');
         L.push('  background-image: none !important;');
+        // 毛玻璃永远不写在播放栏上：backdrop-filter 会创建层叠上下文，
+        // 把播放栏抬到与进度条白点同一层，而它在文档流里更靠后，会盖住白点
+        L.push('  backdrop-filter: none !important;');
+        L.push('  -webkit-backdrop-filter: none !important;');
+        L.push('}');
+
+        // 毛玻璃改写在父容器上（类名由 syncBlurHost 添加）
         if (blur > 0) {
+            L.push('.' + BLUR_HOST_CLS + ' {');
             L.push('  backdrop-filter: blur(' + blur + 'px) !important;');
             L.push('  -webkit-backdrop-filter: blur(' + blur + 'px) !important;');
+            L.push('}');
         }
-        L.push('}');
 
         // 清理潜在背景容器的背景色
         L.push(':is(.default-bar-wrapper, [class*="DefaultBarWrapper_"]) :is(.default-bar-bg, [class*="BarBG"], [class*="bar-bg"]) {');
@@ -566,6 +578,25 @@
      * 兼容模式（内联样式 + DOM 监听兜底）
      * ---------------------------------------------------------- */
     var INLINE_PROPS = ['background-color', 'background-image', 'backdrop-filter', '-webkit-backdrop-filter'];
+    var INLINE_BLUR_PROPS = ['backdrop-filter', '-webkit-backdrop-filter'];
+    var inlineBlurApplied = false;
+
+    // 毛玻璃内联写到宿主（父容器）上，不写播放栏
+    function applyBlurHostInline(host, blur) {
+        if (!host) return;
+        INLINE_BLUR_PROPS.forEach(function (p) {
+            var want = blur > 0 ? 'blur(' + blur + 'px)' : undefined;
+            var cur = host.style.getPropertyValue(p);
+            if (want === undefined) {
+                if (cur) { host.style.removeProperty(p); inlineBlurApplied = false; }
+                return;
+            }
+            if (cur !== want) {
+                host.style.setProperty(p, want, 'important');
+                inlineBlurApplied = true;
+            }
+        });
+    }
 
     function applyInline() {
         if (!state.compatMode || !state.barEnabled) return;
@@ -574,14 +605,11 @@
         var bg = 'rgba(0, 0, 0, ' + clamp(state.opacity, 0, 1, 0.1) + ')';
         var blur = clamp(state.blur, 0, 60, 5);
 
+        // backdrop-filter 不在表内，走下面的 undefined 分支清掉历史残留
         var wanted = {
             'background-color': bg,
             'background-image': 'none'
         };
-        if (blur > 0) {
-            wanted['backdrop-filter'] = 'blur(' + blur + 'px)';
-            wanted['-webkit-backdrop-filter'] = 'blur(' + blur + 'px)';
-        }
 
         INLINE_PROPS.forEach(function (p) {
             var want = wanted[p];
@@ -600,9 +628,14 @@
                 inlineApplied = true;
             }
         });
+
+        // 毛玻璃写到父容器上
+        applyBlurHostInline(hostOfBar(), blur);
     }
 
     function clearInline() {
+        var host = hostOfBar();
+        if (host && inlineBlurApplied) applyBlurHostInline(host, 0);
         if (!barEl || !barEl.isConnected || !inlineApplied) return;
         barEl.style.removeProperty('background-color');
         barEl.style.removeProperty('background-image');
@@ -661,13 +694,30 @@
         } catch (e) { }
     }
 
+    function hostOfBar() {
+        return (barEl && barEl.parentElement) ? barEl.parentElement : null;
+    }
+
+    // React 重渲染可能抹掉类名，所以 applyBar 与 1.5s 轮询都会调它。
+    // 只增删自己这一个类，不碰客户端原有的类
+    function syncBlurHost() {
+        var host = hostOfBar();
+        if (!host || !host.classList) return;
+        var want = state.barEnabled && clamp(state.blur, 0, 60, 5) > 0;
+        var has = host.classList.contains(BLUR_HOST_CLS);
+        if (want && !has) host.classList.add(BLUR_HOST_CLS);
+        else if (!want && has) host.classList.remove(BLUR_HOST_CLS);
+    }
+
     function applyBar() {
         if (!state.barEnabled) {
             clearInline();
+            syncBlurHost();
             return;
         }
         barEl = document.querySelector(BAR_SELECTORS);
         if (barEl) {
+            syncBlurHost();
             applyInline();
         }
     }
@@ -1225,7 +1275,10 @@
 
                 var cur = document.querySelector(BAR_SELECTORS);
                 if (cur !== barEl) barEl = cur;
-                if (cur) applyInline();
+                if (cur) {
+                    syncBlurHost();
+                    applyInline();
+                }
             }, 1500);
         }).catch(function (err) {
             console.warn('[AdvancedPlayBar] 初始化失败：', err);
@@ -1257,6 +1310,6 @@
         get css() { return buildCss(); },
         get barCss() { return buildBarCss(); },
         get hoverCss() { return buildHoverCss(); },
-        version: '1.0.0'
+        version: '1.0.1'
     };
 })();

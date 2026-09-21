@@ -3,7 +3,7 @@
     "manifest_version": 1,
     "name": "AdvancedPlayBar",
     "slug": "advanced-playbar",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "author": "Fina",
     "author_link": "https://github.com/FinaFina233",
     "description": "播放栏增强：透明/毛玻璃播放栏，进度条悬停动效，全局主题色自定义。",
@@ -11,7 +11,7 @@
     "type": "extension",
     "betterncm_version": ">=1.3.4",
     "ncm3-compatible": true,
-    "ncm-version-req": "> 3.1.40",
+    "ncm-version-req": ">= 3.1.20",
     "require_restart": false,
     "startup_script": "startup_script.js",
     "injects": {
