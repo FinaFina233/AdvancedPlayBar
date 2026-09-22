@@ -15,8 +15,7 @@
 
     var SCOPE = '#page_pc_mini_bar';
 
-    // 毛玻璃宿主类名。毛玻璃不能加在播放栏自己身上（backdrop-filter 会创建
-    // 层叠上下文，把进度条白点盖住），要挪到它的父容器上，见 syncBlurHost()
+    // 毛玻璃宿主类名（毛玻璃写在播放栏父容器上，不写播放栏本身，见 buildBarCss）
     var BLUR_HOST_CLS = 'apb-blur-host';
 
     // 播放栏选择器（包含静态类名及 CSS Module 动态哈希前缀，使用 *= 兼容跨版本）
@@ -36,7 +35,14 @@
             glow: true,             // 悬停柔光效果
             accentMode: 'theme',    // 颜色来源：'theme' (跟随主题) | 'custom' (自定义)
             accentRgb: { r: 236, g: 65, b: 65 },
-            maskGlow: 0.05,         // 悬停背景渐变遮罩强度
+            maskGlow: 0.05,         // 悬停背景渐变遮罩强度 (0 = 完全无辉光/无描边)
+
+            // 已播放进度颜色
+            playedMode: 'theme',    // 'theme' (跟随颜色来源) | 'custom' (自定义)
+            playedRgb: { r: 236, g: 65, b: 65 },
+            // 未播放进度颜色，默认不干预（保持客户端原色）
+            unplayedMode: 'native', // 'native' (保持原版) | 'custom' (自定义)
+            unplayedRgb: { r: 45, g: 45, b: 56 },
 
             // 全局主题色（作用于客户端内联 CSS 变量）
             themeMode: 'native',    // 'native' (原生不干预) | 'custom' (自定义)
@@ -341,8 +347,7 @@
         L.push('  background: ' + bg + ' !important;');
         L.push('  background-color: ' + bg + ' !important;');
         L.push('  background-image: none !important;');
-        // 毛玻璃永远不写在播放栏上：backdrop-filter 会创建层叠上下文，
-        // 把播放栏抬到与进度条白点同一层，而它在文档流里更靠后，会盖住白点
+        // 毛玻璃不写播放栏上：backdrop-filter 会创建层叠上下文，把白点盖住
         L.push('  backdrop-filter: none !important;');
         L.push('  -webkit-backdrop-filter: none !important;');
         L.push('}');
@@ -412,12 +417,34 @@
         L.push('    transform var(--apb-dur) var(--apb-ease) !important;');
         L.push('}');
 
+        // 辉光强度为 0 时不生成任何发光和描边（白点那圈白描边也算描边）
+        var mgGlow = clamp(state.maskGlow, 0, 1, 0.05);
+        var glowOn = mgGlow > 0;
+
         // 2. 轨道与已播进度样式（需清除原生渐变背景）
         L.push(':where(' + SCOPE + ' .slider-default) { border-radius: 999px; }');
         L.push(':where(' + SCOPE + ' .slider-default .cache) { border-radius: 999px; background: rgba(255, 255, 255, 0.08); }');
+
+        // 未播放进度颜色：默认不干预，只有选了自选颜色才写
+        if (state.unplayedMode === 'custom') {
+            var un = state.unplayedRgb || {};
+            var unHex = rgbToHex([clampByte(un.r, 45), clampByte(un.g, 45), clampByte(un.b, 56)]);
+            L.push(':where(' + SCOPE + ' .slider-default) {');
+            L.push('  background-color: ' + unHex + ' !important;');
+            L.push('  background-image: none !important;');
+            L.push('}');
+        }
+
+        // 已播放进度颜色：跟随颜色来源，或单独指定
+        var trackColor = 'var(--apb-accent)';
+        if (state.playedMode === 'custom') {
+            var pl = state.playedRgb || {};
+            trackColor = rgbToHex([clampByte(pl.r, 236), clampByte(pl.g, 65), clampByte(pl.b, 65)]);
+        }
+
         L.push(':where(' + SCOPE + ' .slider-default .track) {');
         L.push('  border-radius: 999px;');
-        L.push('  background-color: var(--apb-accent) !important;');
+        L.push('  background-color: ' + trackColor + ' !important;');
         L.push('  background-image: none !important;');
         L.push('  opacity: 0.9;');
         L.push('}');
@@ -432,41 +459,60 @@
         // 3. 播放滑块白点（thumb）样式（定位由客户端内联样式负责）
         L.push(':where(' + SCOPE + ' .slider-default .thumb) {');
         L.push('  background: var(--apb-accent) !important;');
-        L.push('  box-shadow:');
-        L.push('    0 0 0 2px rgba(255, 255, 255, 0.16),');
-        L.push('    0 0 10px 2px rgba(var(--apb-accent-rgb), 0.55),');
-        L.push('    0 0 22px 6px rgba(var(--apb-accent-rgb), 0.28) !important;');
-        L.push('}');
-
-        // 4. 悬停柔光
-        if (state.glow) {
-            L.push(SCOPE + ' .slider-default:hover,');
-            L.push(SCOPE + ' .cmd-space:hover > .slider-default,');
-            L.push(SCOPE + ' [class*="SpaceContainer"]:hover > .slider-default {');
-            L.push('  box-shadow: 0 0 16px rgba(var(--apb-accent-rgb), 0.38), 0 0 2px rgba(var(--apb-accent-rgb), 0.55) !important;');
-            L.push('  border-radius: 999px;');
-            L.push('}');
-
-            L.push(SCOPE + ' .slider-default:hover .track,');
-            L.push(SCOPE + ' .cmd-space:hover > .slider-default .track {');
-            L.push('  box-shadow: 0 0 12px rgba(var(--apb-accent-rgb), 0.45) !important;');
-            L.push('}');
-
-            L.push(SCOPE + ' .slider-default:hover > *,');
-            L.push(SCOPE + ' .cmd-space:hover > .slider-default > * {');
-            L.push('  box-shadow: none !important;');
-            L.push('}');
-
-            L.push(SCOPE + ' .slider-default:hover .thumb,');
-            L.push(SCOPE + ' .cmd-space:hover > .slider-default .thumb {');
+        if (glowOn) {
+            // 外圈白描边 + 两层彩色辉光
             L.push('  box-shadow:');
             L.push('    0 0 0 2px rgba(255, 255, 255, 0.16),');
             L.push('    0 0 10px 2px rgba(var(--apb-accent-rgb), 0.55),');
             L.push('    0 0 22px 6px rgba(var(--apb-accent-rgb), 0.28) !important;');
-            L.push('}');
+        } else {
+            // 辉光强度为 0：连白色描边也去掉，白点就是一个纯色圆
+            L.push('  box-shadow: none !important;');
+        }
+        L.push('}');
+
+        // 4. 悬停柔光
+        if (state.glow) {
+            // 强度 > 0 才画发光
+            if (glowOn) {
+                L.push(SCOPE + ' .slider-default:hover,');
+                L.push(SCOPE + ' .cmd-space:hover > .slider-default,');
+                L.push(SCOPE + ' [class*="SpaceContainer"]:hover > .slider-default {');
+                L.push('  box-shadow: 0 0 16px rgba(var(--apb-accent-rgb), 0.38), 0 0 2px rgba(var(--apb-accent-rgb), 0.55) !important;');
+                L.push('  border-radius: 999px;');
+                L.push('}');
+
+                L.push(SCOPE + ' .slider-default:hover .track,');
+                L.push(SCOPE + ' .cmd-space:hover > .slider-default .track {');
+                L.push('  box-shadow: 0 0 12px rgba(var(--apb-accent-rgb), 0.45) !important;');
+                L.push('}');
+
+                L.push(SCOPE + ' .slider-default:hover > *,');
+                L.push(SCOPE + ' .cmd-space:hover > .slider-default > * {');
+                L.push('  box-shadow: none !important;');
+                L.push('}');
+
+                L.push(SCOPE + ' .slider-default:hover .thumb,');
+                L.push(SCOPE + ' .cmd-space:hover > .slider-default .thumb {');
+                L.push('  box-shadow:');
+                L.push('    0 0 0 2px rgba(255, 255, 255, 0.16),');
+                L.push('    0 0 10px 2px rgba(var(--apb-accent-rgb), 0.55),');
+                L.push('    0 0 22px 6px rgba(var(--apb-accent-rgb), 0.28) !important;');
+                L.push('}');
+            } else {
+                // 强度为 0：悬停也不出现任何发光
+                L.push(SCOPE + ' .slider-default:hover,');
+                L.push(SCOPE + ' .cmd-space:hover > .slider-default,');
+                L.push(SCOPE + ' [class*="SpaceContainer"]:hover > .slider-default,');
+                L.push(SCOPE + ' .slider-default:hover > *,');
+                L.push(SCOPE + ' .cmd-space:hover > .slider-default > * {');
+                L.push('  box-shadow: none !important;');
+                L.push('}');
+            }
 
             // 悬停背景遮罩：覆盖客户端原生渐变变量与背景图
-            var mg = clamp(state.maskGlow, 0, 1, 0.05);
+            // 强度为 0 也要覆盖（全透明），不覆盖的话客户端黑遮罩会回来
+            var mg = mgGlow;
             var stops = [0, 0.06, 0.12, 0.24, 0.35, 0.53, 0.71, 0.88, 1];
 
             L.push('html, :root, body, ' + SCOPE + ' {');
@@ -1166,7 +1212,7 @@
         root.appendChild(modeRow({
             label: '颜色来源',
             modeKey: 'accentMode',
-            hint: '进度条、圆点与光晕的颜色',
+            hint: '圆点、光晕与副歌标记的颜色',
             modes: [['theme', '跟随主题'], ['custom', '自选颜色']],
             onChange: rebuild
         }));
@@ -1174,6 +1220,32 @@
         root.appendChild(colorPicker({
             modeKey: 'accentMode',
             rgbKey: 'accentRgb'
+        }));
+
+        root.appendChild(modeRow({
+            label: '已播放进度',
+            modeKey: 'playedMode',
+            hint: '进度条已播部分的颜色',
+            modes: [['theme', '跟随颜色来源'], ['custom', '自选颜色']],
+            onChange: rebuild
+        }));
+
+        root.appendChild(colorPicker({
+            modeKey: 'playedMode',
+            rgbKey: 'playedRgb'
+        }));
+
+        root.appendChild(modeRow({
+            label: '未播放进度',
+            modeKey: 'unplayedMode',
+            hint: '进度条未播部分的颜色',
+            modes: [['native', '保持原版'], ['custom', '自选颜色']],
+            onChange: rebuild
+        }));
+
+        root.appendChild(colorPicker({
+            modeKey: 'unplayedMode',
+            rgbKey: 'unplayedRgb'
         }));
 
         // 3. 全局主题色
@@ -1238,12 +1310,21 @@
         }
         saved.accentRgb = fixRgb(saved.accentRgb, 236, 65, 65);
         saved.themeRgb = fixRgb(saved.themeRgb, 236, 65, 65);
+        saved.playedRgb = fixRgb(saved.playedRgb, 236, 65, 65);
+        saved.unplayedRgb = fixRgb(saved.unplayedRgb, 45, 45, 56);
 
         if (['theme', 'custom'].indexOf(saved.accentMode) === -1) {
             saved.accentMode = 'theme';
         }
         if (['custom', 'native'].indexOf(saved.themeMode) === -1) {
             saved.themeMode = 'native';
+        }
+        // 旧存档没有这两个键 -> 落到默认值（已播放跟随颜色来源、未播放不干预）
+        if (['theme', 'custom'].indexOf(saved.playedMode) === -1) {
+            saved.playedMode = 'theme';
+        }
+        if (['native', 'custom'].indexOf(saved.unplayedMode) === -1) {
+            saved.unplayedMode = 'native';
         }
 
         saved.maskGlow = clamp(saved.maskGlow, 0, 1, 0.05);
@@ -1310,6 +1391,6 @@
         get css() { return buildCss(); },
         get barCss() { return buildBarCss(); },
         get hoverCss() { return buildHoverCss(); },
-        version: '1.0.1'
+        version: '1.1.0'
     };
 })();
